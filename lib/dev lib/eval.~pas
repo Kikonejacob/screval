@@ -1,0 +1,441 @@
+unit geval;
+
+interface
+uses classes,sysutils,forms,windows;
+
+
+
+{ type commun des tableau de string et integer }
+type Strarr=array of string;
+type intarr=array of extended;
+     TEvalAccess=(aPrivate,aPublic);
+
+{Structure du resultat dans eval. structure d'une donnée dans EPeval} {rev 29.juil.2009}
+type
+Prinfo=^drinfo;
+drinfo=record
+     IntValue:integer;
+     CharValue:PChar;
+     BoolValue:Boolean;
+     rtype:integer;
+     ErrId:integer;{a supprimer}
+     floatvalue:double;
+     obj:Tobject;
+     pt:Pointer;
+     olevar:olevariant; {Variables ole}
+     interf:IUnknown; {interface ole pour par exemple recordset de ADO}
+     name:string;
+     group:string;
+     arrays:array of Prinfo;{pour creer un tableau }
+     access:TevalAccess;
+     heritedNameSpace:string;
+     isReference:boolean;
+     reference:string;
+     DefaultValue:string;{utilisé uniquement pour les parmètre des fonctions voir PParamInfo; }
+     key:string{pour les arrays}
+
+end;
+
+{Info sur script}
+type
+
+Pinstruction=^dinstruction;
+dinstruction=record
+   text:string;
+   _type:integer;
+   canEval:boolean;
+   position:integer;
+   startpos:integer;{indique le debu du  bloc}
+   state:(iUntraited,iTraited);
+end;
+
+ {Table des namespaces dépendant d'un namespace donné}
+type
+PNameSpaceDepends=^TNameSpaceDepends; {obsolete}
+TNameSpaceDepends=record
+   index:integer; // index dans la liste
+   str:string;
+   nextchild:PNameSpaceDepends;
+end;
+type
+TScrDependency=array of string;
+{Structure d'un namespace}
+type
+Pscr=array of Pinstruction;
+Pinstructions =array of Pinstruction;
+PscrInfo=^dscrInfo;
+dscrInfo=record
+   instructions:Pinstructions;
+   cmd:integer;
+   cmdArg:pointer;
+   index:integer;{indique la postion dans le script lors de l'évalutation: a ne pas confondre avec l'index dans le namespacelist}
+   error_id:integer;
+   error_pos:integer;
+   error_line:integer;
+   error_msg:string;
+   error_namespace:string;{indique le namespace dans lequel lerreur s'est produite}
+   silenceMode:Boolean;{n'indique pass d'erreur sur l'écran}
+   echo_str:string;{echo string}
+   texte:string;
+   parent:string;
+   //ParentIndex:integer;{index du Namespace parent dans la liste}
+   Name:string;
+   //NamespaceId:integer;
+   scrFileName:string;
+   scrFilePos:integer;
+   //childNameSpaces:PNameSpaceDepends;
+   //scrChildsId:array of integer;{indique l'index de tous les namespace qui heritent de scrinfo}
+   heritedNameSpace:string;
+   _type:(scr_run,scr_namespace,scr_class,scr_class_instance,scr_embedded);
+   defaultMemberAccess:TevalAccess;
+   dependency:TscrDependency;
+   PID:integer;{indique le numero de l'instance de l'évaluteur}
+
+end;
+
+{structure alternative pour déclarer des erreurs dans le scrip: utilisé par exemple par la boucle for:
+obsolete (na plus  besoin) }
+PAlternativeScrError=^dAlternativeScrError;
+dAlternativeScrError=record
+      error_id:integer;
+      error_msg:string;
+      error_pos:integer;
+      error_line:integer;
+end;
+const
+      MaxListSize = Maxint div 16;
+      instruct_token=0;
+      instruct_bloc=1;
+      instruct_prebloc=2;
+      instruct_passive=3;
+{conteneur de pointer}
+type
+Plist=^dList;
+dList=record
+  Flist:array[0..MaxListSize - 1] of Pointer;
+  count:integer;
+end;
+
+
+
+{end Info sur script}
+{Structure d'une fonction dans eval.}
+type
+Pfunc=^dfunc;
+dfunc=record
+     ftype:integer;//soit adressage de function soit function dans une  dll.
+     name:string;
+     params:string; {exemple:tab:int;an:char}
+     pfunc:pointer; //adresse de la function
+     helpfunc:pointer; //adresse de la function d'aide
+     lib:string; //au cas ou c'est une function d'une dll
+     rtype:integer; //type du resultat
+     groupe:string;
+{uniquement pour les fonctions virtuelles}
+     v_instruct:PInstruction;
+     v_location:integer; {position de l'instruction a executer au cas d'appel de la function}
+     heritedNameSpace:string;
+     access:TevalAccess;
+end;
+{Structure  d'informations sur le processus d'évaluation}
+type
+    TPreviewTraited=(pt_none,pt_variable,pt_const,pt_function,pt_operator); {indique la nature de la dernière colonne traitée}
+    TErrorDeclarationMode=(errNormal,errAlternative,errNamespace);
+type
+PEpinfo=^dEpinfo;
+dEpinfo=record
+     ForUser:boolean;
+     cmd:integer; {indique une petite tache en cours provoquée par une function de l'évaluateur}
+     cArg1:string;{argument du cmd}
+     cArg2:integer;{argument du cmd}
+     cArg3:pointer;
+     traited:boolean;{traitement de boolean}
+     x:integer;
+     y:integer;
+     ListRootStr:string;
+     KeyValue:integer;
+     ErrId:integer;
+     ErrParams:string;
+     ErrPos:integer;
+     ErrNamespace:string;{indique le namespace dans lequel s'est produit l'erreur}
+     ErrLn:integer;{utilisé unique en cas declaration alternative de script}
+     ErrRigthLnCount:integer;
+     ErrStrPos:integer; {indique la position exacte de l'erreur dans le texte de l'expressioon}
+     ErrDeclationMode:TErrorDeclarationMode;{indique le type d'erreur en fonction du lieu ou s'est produit l'erreur }
+     //AlternativeErrorDeclaration:boolean;{alternative  pour déclarer un erreur dont on a deja les infos dans le script}
+     BreakChar:string;{si Epeval  rencontre ce charactère arrête brutalement l'expression}
+     scr_scr:Pinstructions;
+     scr_cmd:integer;
+     scr_cmdArg:pointer;
+     scr_index:integer;
+     group:string;
+     prev_traited:TPreviewTraited;
+     silentMode:boolean;{n'affice pas les erreur}
+     scr_switch_info:PrInfo;{pour la structure switch}
+     groupIndex:integer;
+     groupParentIndex:integer;
+     defaultMemberAccess:TevalAccess;
+     PID:integer;
+
+end;
+
+{Structure d'un operateur}
+type
+Poperator=^doperator;
+doperator=record
+name:string;
+Pop:pointer;
+leftOp:string;{indique les différents opérateur qui peuvent se placé avant ce operateur} 
+helpFunc:pointer;
+helpId:integer;
+end;
+{Structure d'information sur un paramètre d'une fonction}
+type
+{PparamInfo=^dparamInfo;
+dparamInfo=record
+       pname:string;
+       ptype:integer;
+       rinfo:Prinfo;
+end;
+}
+PParamInfo=Prinfo;
+
+
+{Structure d'une constant dans l'évaluateur d'expression}
+type
+PConstInfo=^dConstInfo;
+dConstInfo=record
+   name:string;
+   rInfo:PrInfo;
+   groupe:string;
+end;
+
+{Structure d'une variable dans l'évaluateur d'expression}
+type
+PvarInfo=Prinfo;
+{struction d'informations pour la rechercher d'un fonction 1.09.2010}
+type PFuncSearchInfo=^dFuncSearchInfo;
+dFuncSearchInfo=record
+   DeclarationArgList:Tlist;
+   ParamList:Tlist;
+end;
+
+{Structure d'information sur un processus d'evaluation }
+type
+PevalProcessInfo=^devalProcessInfo;
+devalProcessInfo=record
+   PID:integer;
+   AppHandle:Thandle;
+   Locked:boolean;
+end;
+type
+PevalEventHook=^devalEventHook;
+devalEventHook=record
+   PID:integer;
+   ScreenHandler:pointer;
+   EvalStatusHandler:pointer;
+   AppHandle:Thandle;
+end;
+{prototype d'un fonction screeProc}
+type
+   TScreenProc=function(screentext:string):integer;
+{
+{Constantes d'erreurs}
+const
+      E_NoAllArgs=1;
+      E_NoCharEnd=2;
+      E_NoParaEnd=3 ;
+      E_Syntax=4;
+      E_divError=5;
+      E_OpError=6;
+      E_Incompatible=7;
+      E_Extra=8;
+      E_IF_ARGCOUNT=9;
+      E_FOR_ARGCOUNT=10;
+      E_WHILE_ARGCOUNT=11;
+      E_PARA_WANTED=12;
+      E_UnknowSymbol=13;
+      E_SWITCH_SYNTHAX=14;
+      E_SWITHC_ARG_TYPE=15;
+      E_UNAPPROPRIETED_USEOFBREAK=16;
+      E_CASE_TYPE_INVALID=17;
+      E_CASE_SYNTHAX=18;
+      E_REPEAT_SYNTHAX=19;
+      E_REPEAT_WHILE_SYNTHAX=20;
+      E_TRY_SYNTHAX =21;
+      E_TRY_CATCH_SYNTHAX=22;
+      E_TRY_FINALY_SYNTHAX=23;
+      E_Parse_ERROR=24;
+      E_FUNCTION_ARG=25;
+      E_PERSONAL=1000;
+
+      E_None=-1;
+
+{Operateur}
+//const Opstr='+;-;(;);*;/;&;<;>;=;";,;.;[;];:;'+'!;$;%,%;!; ;';  (sauvegarde)
+const Opstr='+;-;(;);*;/;&;<;>;=;";,;.;[;];:;'+'!;$;%,%;!; ;'';?>;<?;';
+
+{Const cmd de eval}
+const WorkAddition=0;{permet de respecter la priorité de (+et/) sur(+et-)}
+      WorkNone=-1;
+      workUntil=1;{arrete l'evaluation si caractère spécifié rencontré}
+      workabort=2;
+      work_BOUCLE_END=3;{intervient lors de l'appel de break pour arrêter une boucle for ,while}
+      work_SWITCH=4;
+      work_CASE=5;
+      work_REPEAT_WHILE_CONDITION=6;
+      work_REPEAT_BREAK=7;
+      work_REPEAT_CONTINUE=8;
+      work_TRY_FUNC=9;
+      Work_TRY_CATCH=10;
+      work_TRY_FINALY=11;
+      wait_TRY_OP=12;
+      wait_TRY_CATCH=13;
+      wait_TRY_FINALY=14;
+      wait_TRY_FINALY_FACULTATIF=15;
+      work_NAMESPACEDef=16;
+      work_CLASSDEF=17;
+{def const pour scrip eval}
+const scr_cmd_abort=18;
+      scr_cmd_jumpline=19;
+      scr_cmd_error=20;
+      scr_cmd_jump_to=21;
+{fin const script eval }
+     work_SETPREVIEWTRAITED=22;
+
+{Liste des constantes pour scr}
+const
+     SCR_CMD_SWITCH=Work_SWITCH;
+     SCR_CMD_CASE=work_CASE;
+{Listes des function,constantes,opérateur, de eval}
+ 
+var funcList:Tlist;
+var constList:Tlist;
+var OperatorList:TList;
+var varlist:TList;
+var evalProcessList:TList;
+    evalEventsHooks:Tlist;
+    namespaceList:Tlist;
+    IsEvalInit:boolean;
+    lastnamespaceID:integer;{pour permettre l'autoincrementation des namespace lors de la déclaration}
+
+{type de fonction}
+const ft_Adress=0;
+const ft_dll=1;
+      ft_virtual=2;
+{Type de resultat}
+const vt_integer=0;
+      vt_Char=1;
+      vt_bool=2;
+      vt_float=3;
+      vt_date=4;
+      vt_numeric=5;
+      vt_dbdata=6;
+      vt_none=-1;
+      vt_array=7;
+      vt_array_row=8;
+      vt_namespaceRef=9;
+      vt_new_class_instance=10;
+      vt_funcRef=11;
+      vt_type=12;
+      vt_null=13;
+      rt_pointer=14;{type réel pointer}
+      rt_Prinfo=15;{type réel return une structure Prinfo}
+
+{pour les cmd}
+const Cpermanent=1;
+
+var tmpNumSerial:integer;{pour les serials}
+
+
+var
+  libEval_Handle:Thandle;
+  initEval:function:boolean;stdcall;
+
+  EvalScriptFromFile:function(filepath:pchar;PID:integer):integer;stdcall;
+  ScriptEvalEx:function (text:pchar;scr:PscrInfo;PID:integer):integer;stdcall;
+  ScriptFileEval:function (filename:pchar;scr:PscrInfo;PID:integer):integer;stdcall;
+  GetFunc: function (funcname,group:pchar;rfunc:Pfunc):integer;stdcall;
+  SetFunc:function (func:PFunc):integer;stdcall;
+  Setvar:function (rvar:PvarInfo):integer; stdcall;
+  Getvar:function (name,group:pchar;rvar:PvarInfo):integer;stdcall;
+  fill_scr:function (scr:PscrInfo;parent:pchar):integer;stdcall;
+  Fillrinfo:function (rinfo:prinfo):integer; stdcall;
+  SetEvalHook:function (Hook:PEvalEventHook):integer;stdcall;
+  CreatEvalProcess:function (ProcessInfo:PevalProcessInfo):integer;stdcall;
+  ExpEvalEx:function (Epstr:pchar;rinfo:prinfo;forUser:boolean;EpInfo:PepInfo;scr:PscrInfo):integer;stdcall;
+  ExpEval:function (Epstr:pchar;rinfo:prinfo;forUser:boolean;EpInfo:PepInfo;group:pchar):integer;stdcall;
+  AddNamespace:function (scr:PscrInfo;name:pchar;AutoCreateParent:boolean):integer;stdcall;
+  AddReadyNamespace:function (name:pchar;AutoCreateParent:boolean):integer;stdcall;
+  DeleteVar:function (varstr,group:pchar):integer;stdcall;
+
+
+
+
+
+procedure libEval_free;
+function LibEval_InitEx(Libhandle:Thandle):integer;
+function LibEval_Init(name:pchar):integer;
+
+
+
+
+
+
+
+implementation
+
+function LibEval_InitEx(Libhandle:Thandle):integer;
+  function assign_proc(var proc: FARPROC; name: pChar):integer;
+  begin
+    result:=0;
+    proc := GetProcAddress(libEval_handle, name);
+    if proc = nil then result := -1;
+  end;
+
+begin
+  libEval_handle:=LibHandle;
+  if libEval_handle = 0 then result:=-1
+  else
+  begin
+    //libmysql_status := LIBMYSQL_READY;
+    assign_proc(@initEval, 'initEval');
+    assign_proc(@CreatEvalProcess, 'CreatEvalProcess');
+    assign_proc(@SetEvalHook, 'SetEvalHook');
+    assign_proc(@Fillrinfo, 'Fillrinfo');
+    assign_proc(@fill_scr, 'fill_scr');
+    assign_proc(@Getvar, 'Getvar');
+    assign_proc(@Setvar, 'Setvar');
+    assign_proc(@SetFunc, 'SetFunc');
+    assign_proc(@GetFunc, 'GetFunc');
+    assign_proc(@ScriptFileEval, 'ScriptFileEval');
+    assign_proc(@EvalScriptFromFile, 'EvalScriptFromFile');
+    assign_proc(@ExpEvalEx, 'ExpEvalEx');
+    assign_proc(@ExpEval, 'ExpEval');
+    assign_proc(@AddReadyNamespace, 'AddReadyNamespace');
+    assign_proc(@AddNamespace, 'AddNamespace');
+    assign_proc(@DeleteVar, 'DeleteVar');
+
+  end;
+
+
+end;
+function LibEval_Init(name:pchar):integer;
+begin
+  libEval_free;
+  if name = nil then name :='libscreval.dll';{ a voir spécifier le path complet pour éviter les virus}
+  libEval_handle := LoadLibrary(name);
+  result:=LibEval_InitEx(libEval_Handle);
+end;
+
+
+procedure libEval_free;
+begin
+  if libEval_handle <> 0 then FreeLibrary(libEval_handle);
+  libEval_handle := 0;
+end;
+
+
+
+
+end.

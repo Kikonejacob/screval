@@ -1,0 +1,529 @@
+unit script;
+
+interface
+uses eval,windows,sysutils,dialogs;
+{gutils est utilisé uniquement pour xcount_delimiter()}
+const
+      MaxListSize = Maxint div 16;
+      instruct_token=0;
+      instruct_bloc=1;
+      instruct_prebloc=2;
+const scr_cmd_abort=0;
+      scr_cmd_jumpline=1;
+      scr_cmd_error=2;
+      scr_cmd_jump_to=3;
+{conteneur de pointer}
+type
+Plist=^dList;
+dList=record
+  Flist:array[0..MaxListSize - 1] of Pointer;
+  count:integer;
+end;
+
+
+
+
+
+
+function pl_add(Item:pointer;list:plist):integer;
+function pl_get(index:integer;list:plist):integer;
+function pl_delete(index:integer;list:plist):integer;
+function pl_mov(index,new_index:integer;list:plist):integer;
+function xcount_delimiter(delimiter,str:string):integer;
+
+function scr_decompose(texte:string;sc:Pinstructions):pinstructions;
+function scr_operate(scr:PscrInfo):integer;
+function scr_eval(text:string):PscrInfo ;
+function scr_evalEx(text:string;scr:PscrInfo):integer;
+
+function msgbox(str:string):integer;
+
+implementation
+
+uses DLG_SCR_ERROR;
+function pl_add(Item:pointer;list:plist):integer;
+
+begin
+   Result := list.count;
+   list.Flist[Result] := Item;
+end;
+function pl_get(index:integer;list:plist):integer;
+begin
+end;
+function pl_delete(index:integer;list:plist):integer;
+begin
+end;
+function pl_mov(index,new_index:integer;list:plist):integer;
+begin
+end;
+
+{fonction qui permet d'avoir la fin d'un bloc}
+function get_bloc_end(texte,b_beg,b_end:string):integer;
+var
+    count_beg,count_end,i:integer;
+    str,tmp:string;
+begin
+
+   count_beg:=0;count_end:=0;
+    str:=texte;   i:=1;
+   // msgbox('jhhj');
+    while (((count_beg<>count_end) or (count_beg=0)) and (i<=length(str)) )do
+    begin
+     tmp:=copy(str,i,length(b_beg));
+    // msgbox(tmp);
+     if (pos(b_beg,tmp)>0) then    inc(count_beg);
+     tmp:=copy(str,i,length(b_end));
+     if (pos(b_end,tmp)>0) then    inc(count_end);
+     If (count_Beg=count_End)and (count_Beg>0)then
+     begin
+     Result:=i;
+     break;
+     end;
+
+    inc(i) ;
+   // msgbox(str);
+    end;
+     // si pBeg=pEnd appliquer la procedure ci-dessous est justifié #crer une routine d'erreur
+    If count_beg<>count_end Then
+   result:=-1;{Renvoie une erreur}
+    //msgbox(copy(str,result,length(str))+inttostr(result));
+  
+end;
+
+function f_error(i:integer):integer;
+begin
+  messagebox(0,'gffg','fggfg',0);
+end;
+function msgbox(str:string):integer;
+begin
+   messagebox(0,Pchar(str),'fggfg',0);
+end;
+
+//fonction qui permet de compter le nombre de repetition de caractère dans une chaine
+function count_str(texte,ch:string):integer ;
+var
+  str:string;count,i:integer;
+begin
+  str:=texte;i:=pos(ch,str); count:=0;
+  while(not(i=0)) do
+  begin
+    inc(count);
+    str:=copy(str,i+1,(length(str)-i));
+    i:=pos(ch,str);
+  end;
+  result:=count;
+end;
+
+//Parse le texte en insctructions;
+function scr_decompose(texte:string;sc:Pinstructions):pinstructions;
+{Determine si les mot clée ne sont pas contenu dans du texte}
+function IsnotInText(str:string):boolean;
+begin
+
+  if (count_str(str,'"')/2)>0 then
+  result:=(count_str(str,'"')/2)=int((count_str(str,'"')/2))
+  else
+  if (count_str(str,'''')/2)>0 then
+  result:=(count_str(str,'''')/2)=int((count_str(str,'''')/2))
+  else
+  result:=true;
+end;
+var
+  str,tmp:string;
+  i,a,lastpos:integer;
+  scr:Pinstructions;
+  instruction:pinstruction;
+  traited:boolean;
+  iscomment:boolean;
+begin
+  str:=texte;lastpos:=1;i:=1;
+  //showmessage(str);
+  while(i<=length(str)) and (length(str)>0) do
+  begin
+   //Detection des tokens
+   //msgbox(inttostr(i));
+   //msgbox(str+inttostr(i));
+   traited:=false;
+
+     //Detection des commentaires inline
+   if (pos('//',copy(str,i,2))>0)  and  IsnotInText(copy(str,0,i)) then
+   begin
+   tmp:=copy(str,i,length(str)-i);
+     if  (pos(#13#10,tmp)>0)  then    a:=i+pos(#13#10,tmp)   else    a:=length(str);
+     //Ici a represente le premier retour a la ligne après // ou la fin du texte
+     //showmessage(inttostr(a));
+    //showmessage(inttostr((count_str(copy(str,1,i),'"')))+' COMPARE '+inttostr(count_str(copy(str,i,a-i),'"')));
+
+     if (count_str(copy(str,1,i),'"'))=0 then
+     iscomment:=true
+     else
+     iscomment:= not(count_str(copy(str,1,i),'"')=count_str((copy(str,i,a-i)),'"'));
+     if iscomment then
+     begin
+      // msgbox( 'COMMENT:'+copy(str,i,a-i));
+
+
+       lastpos:=lastpos+a;
+       i:=0;
+       str:=copy(str,a+1,length(str)-(a));
+      // showmessage(str+' '+inttostr(i)+':'+inttostr(length(texte)));
+
+     end;
+       traited:=true;
+    
+   end
+   else
+   //Detection des commentaires /*commentaire*/
+   if (pos('/*',copy(str,i,2))>0)then
+   begin
+      a:=pos('*/',copy(str,i,length(str)-i)) ;
+      //msgbox(str);
+      if (a=0)then
+      begin
+      //f_error()
+      exit;
+      end;
+      str:=copy(str,a+i+1,length(str)-a);
+      lastpos:=lastpos+a;
+      i:=0;
+      traited:=true;
+
+   end
+   else
+   // saute les ";" contenus dans les parenthèses pour compatibilité avec boucle for
+   if (str[i]='(') then
+   begin
+     //showmessage(copy(str,i,length(str)-i));
+     //showmessage(inttostr(get_bloc_end(copy(str,i,length(str)-i),'(',')'))+ str[i]);
+     //showmessage(copy(str,i, get_bloc_end(copy(str,i,length(str)-i),'(',')')));
+     if (get_bloc_end(copy(str,i,length(str)-i),'(',')')>0) then
+     i:=get_bloc_end(copy(str,i,length(str)-i),'(',')')+i-1;
+     //showmessage('hj'+copy(str,i,length(str)-i+1));
+
+   end
+   else
+   //traite les instructions de base
+   if(str[i]=';') then
+   begin
+     //msgbox('hjhj'+inttostr(count_str(copy(str,0,i),'('))+'  '+inttostr(count_str(copy(str,0,i),')')));
+     if ((count_str(copy(str,0,i),'('))=(count_str(copy(str,0,i),')'))) or
+      ((count_str(copy(str,0,i),'('))>(count_str(copy(str,0,i),')')))   then //si c'est pas dans la string
+     begin
+      new(instruction);
+       // msgbox('hjhj'+copy(str,0,i-1));
+      instruction.text:=copy(str,0,i-1);
+      instruction._type:=instruct_token;
+      instruction.canEval:=true;
+      instruction.position:=lastpos+i;
+      setlength(scr,length(scr)+1);
+      scr[high(scr)]:=instruction;
+      str:=copy(str,i+1,length(str)-(i));
+
+      //msgbox( scr[high(scr)].text);
+      //msgbox(str+' JACOVB');
+      
+      lastpos:=lastpos+i;
+      i:=0;
+      traited:=true;
+     end;
+   end
+     else
+   //Detection des blocs
+   if(str[i]='{') then
+   begin
+      traited:=true;
+     //msgbox('hhjj');
+     //msgbox(copy(str,0,(i-1)));
+     if (length(copy(str,0,(i-1)))>0) then
+     begin
+       new(instruction);
+       instruction._type:=instruct_prebloc;
+       instruction.text:=copy(str,0,i-1);
+       instruction.position:=lastpos+length(instruction.text);
+       setlength(scr,length(scr)+1);
+       scr[high(scr)]:=instruction;
+       //msgbox(scr[high(scr) ].text);
+     end;
+     new(instruction);
+     a:=get_bloc_end(str,'{','}');
+     //msgbox(str+inttostr(a));
+     if (a=0) then
+     begin
+     //result:=f_error(1);exit;
+     end;
+     instruction._type:=instruct_bloc;
+     instruction.text:=copy(str,i+1,(a-i)-1);
+     setlength(scr,length(scr)+1);
+     scr[high(scr)]:=instruction;
+     str:=copy(str,a+1,length(str)-(a));
+     lastpos:=lastpos+a;
+     instruction.position:=lastpos;
+     i:=0;
+     //msgbox(str);
+   end;
+      
+
+   //incremente
+   inc(i);
+  end;
+
+  if (traited=false) and (length(str)>0) then
+  begin
+
+  end;
+  if trim(str)<>'' then
+  begin
+  end;
+
+ // msgbox(inttostr(length(scr)));
+  sc:=scr;
+  result:=scr;
+end;
+
+function scr_eval(text:string):PscrInfo ;
+var
+  scr:PscrInfo;
+begin
+  new(scr);
+  scr.cmd:=-1;
+  scr.error_id:=-1;
+  scr.instructions:=scr_decompose(text,scr.instructions);
+  //showmessage('hjhj');
+  scr.texte:=text;
+  scr.silenceMode:=false;
+  scr_operate(scr);
+  result:=scr;
+end;
+
+function scr_evalEx(text:string;scr:PscrInfo):integer;
+begin
+  scr.instructions:=scr_decompose(text,scr.instructions);
+  scr.texte:=text;
+  scr_operate(scr);
+  AddNameSpace(scr:PscrInfo,scr.namespace);
+
+end;
+
+//gestion des erreurs dans le script
+function Manage_scr_error(EpInfo:PepInfo;scr:PscrInfo):integer;
+var
+  str:string; i:integer;
+begin
+ { for i:=0 to high(scr.instructions) do
+  begin
+  str:=str+scr.instructions[i].text;
+  end;
+ }
+
+  // showmessage('jkjkj:'+str);
+   if not scr.silenceMode then
+   ShowScrError(EpInfo,scr,'',str);
+end;
+// function qui permet de conter les nombres d'apparition d'un mot dans un string }
+function xcount_delimiter(delimiter,str:string):integer;
+var
+  text:string;
+  i:integer;
+begin
+  i:=0 ;{ pour la dernière ligne}
+  text:=str;
+  while (pos(delimiter,text)>0) do
+  begin
+    inc(i);
+    text:=copy(text,pos(delimiter,text)+length(delimiter),length(text)- pos(delimiter,text));
+  end;
+  //showmessage(str);
+  result:=i;
+end;
+
+{renvoi l'erreur de lepInfo dans ScrInfo pour la gestion des erreur par le script
+ici instructionId= le numero de l'instruction dans le tableau scr.instructions}
+function epError_to_scr(epInfo:PepInfo;scr:PscrInfo;instructionId:integer):boolean;
+var
+  ipos:integer;
+begin
+      scr.error_id:=epInfo.ErrId;
+      ipos:=scr.instructions[instructionId].position ;
+      if epinfo.ErrId<>E_none then
+      if epInfo.AlternativeErrorDeclaration  then {verifie si on a pas utilisé la methode alternative pour déclarer l'erreur}
+      begin
+        scr.error_id:=Epinfo.ErrId;
+        scr.error_pos:=Epinfo.ErrPos+ipos;
+        scr.error_msg:=Epinfo.ErrParams;
+        scr.error_line:=EpInfo.ErrLn+xcount_delimiter(#13#10,copy(scr.texte,0,ipos));
+        {au cas où on demande de faire un calcul normale des lignes a partir de scr.error_pos}
+       
+        if (EpInfo.ErrLn=-1) then
+        begin
+        //showmessage(copy(scr.texte,0,scr.error_pos));
+        scr.error_line:=1+xcount_delimiter(#13#10,copy(scr.texte,0,scr.error_pos))//-EpInfo.ErrRigthLnCount;
+        end;
+        //showmessage(scr.error_msg);
+      end
+      else
+      {sinon on applique la regle normale}
+      begin
+      //showmessage('jkj');
+      //showmessage(scr.texte);
+      scr.error_pos:=ipos;{a revoir pour la précision}
+      {on compte le nombre de lignes avant la fin du token et on soustrait le nombre avant la partie de
+      de l'erreur}
+      scr.error_line:=1+xcount_delimiter(#13#10,copy(scr.texte,0,ipos))-EpInfo.ErrRigthLnCount;
+      scr.error_msg:=EpInfo.ErrParams;
+      end;
+      result:=true;
+end;
+
+function scr_operate(scr:PscrInfo):integer;
+var
+  eparr:strarr;
+  i:integer;
+  rinfo:Prinfo;
+  scr2:PscrInfo;
+  EpInfo:PepInfo;
+  DefEpInfoCmd:integer;
+  DefEpInfoCmdArg:pointer;
+
+  errid:integer;
+begin
+   i:=0;
+   errid:=0;
+   {cmd manager pour pré evaluation}
+   if scr.cmd=SCR_CMD_SWITCH then
+   begin
+   DefEpInfoCmd:=SCR_CMD_SWITCH;
+   DefEpInfoCmdArg:=scr.cmdArg;
+      
+   end;
+
+   while(not(i>high(scr.instructions))) do
+   begin
+      scr.index:=i;  //showmessage( scr.instructions[i].text);
+      case scr.instructions[i]._type of
+      instruct_token: begin
+                       new(rinfo);
+                       Fillrinfo(rinfo);
+                       new(EpInfo);
+                       EpInfo.scr_cmd:=-1;
+                       EpInfo.cmd:=DefEpInfoCmd; EPInfo.cArg3:=DefEpInfoCmdArg;
+                       EpInfo.silentMode:=true;
+                      // showmessage(scr.instructions[i].text);
+                       errid:=scr_evalEp(scr.instructions[i].text,rinfo,false,epInfo,scr);
+                       epError_to_scr(epInfo,scr,i);{recoi les erreur survenu lors de l'evaluation}
+                       scr.cmd:=EpInfo.scr_cmd;{recoit les cmd pour le script}
+                       scr.cmdArg:=EpInfo.scr_cmdArg;
+                      end;
+      instruct_prebloc:begin
+                       new(rinfo);
+                       Fillrinfo(rinfo);
+                       new(EpInfo);
+                       EpInfo.scr_cmd:=-1;
+                       EpInfo.silentMode:=true;
+                       EpInfo.cmd:=DefEpInfoCmd; EPInfo.cArg3:=DefEpInfoCmdArg;
+                       errid:=scr_evalEp(scr.instructions[i].text,rinfo,false,epInfo,scr);
+                       //showmessage(epInfo.ErrParams +' error from prebloc');
+
+                       epError_to_scr(epInfo,scr,i); {recoi les erreur survenu lors de l'evaluation}
+                       scr.cmd:=EpInfo.scr_cmd;{recoit les cmd pour le script}
+                       scr.cmdArg:=EpInfo.scr_cmdArg;
+                       //i:=EpInfo.scr_index;
+                       end;
+      instruct_bloc: begin
+                       new(scr2);
+                       showmessage('MSG:BLOC');
+                       scr2.cmd:=-1;
+                       scr2.error_id:=-1;
+                       scr2.silenceMode:=true;
+                       errid:=scr_evalEx(scr.instructions[i].text,scr2);
+                       
+                       scr.cmd:=scr2.cmd;{a revoir: pour que les info d'erreurs aussi soit pris en compte}
+                       scr.cmdArg:=scr2.cmdArg;
+                       {ratachement des erreurs}
+                       scr.error_id:=scr2.error_id;
+                       scr.error_pos:=scr2.error_pos+scr.instructions[i].position;  {ajoute la postion de l'instruction geniteur}
+                       //showmessage(inttostr(scr.instructions[i].position))
+                       scr.error_msg:=scr2.error_msg;
+                       scr.error_line:=scr2.error_line+xcount_delimiter(#13#10,copy(scr.texte,0,scr.instructions[i].position));;
+                       end;
+      end;
+      //if (errid>0)    then break;{au cas ou ya erreur}
+      {error manager}
+      //if (errId=E_NONE) then
+      if (scr.error_id<>E_none) then
+      begin
+      //showmessage('jkj');
+      Manage_scr_error(epInfo,scr);
+      break;
+      end;
+      {cmd manager}
+      if scr.cmd=work_try_func then
+      begin
+         scr.cmd:=wait_try_op;
+         //showmessage('jkj');
+         inc(i);
+      end
+      else
+      if scr.cmd=wait_try_op then
+      begin
+         scr.error_id:=E_Try_synthax;
+      end
+      else
+      if scr.cmd=work_try_catch then
+      begin
+        inc(i);
+        scr.cmd:=wait_try_finaly_facultatif;
+      end
+      else
+      if scr.cmd=wait_try_finaly then
+      begin
+        scr.Cmd:=E_None ;
+        scr.error_id:=E_Try_synthax;
+      end
+      else
+      if scr.cmd=work_try_finaly then
+      begin
+         scr.cmd:=E_None;
+         i:=i+1;
+      end;
+      if (scr.cmd=SCR_CMD_CASE) or (scr.cmd=SCR_CMD_SWITCH) then
+      begin
+        DefEpInfoCmd:=Scr.cmd;
+        DefEpInfoCmdArg:=scr.cmdArg;
+      end;
+      if (scr.cmd=scr_cmd_jumpline) then
+      begin
+         showmessage('jump line');
+         scr.cmd:=E_None;
+         if (scr.instructions[i]._type =instruct_prebloc) then
+         i:=i+2
+         else
+         i:=i+1;
+      end
+      else
+      if (scr.cmd=scr_cmd_jump_to) and (EpInfo<>nil) then
+      begin
+         showmessage('jump to line'+inttostr(EpInfo.scr_index));
+         i:=EpInfo.scr_index;
+         scr.cmd:=E_None;
+
+      end
+      else
+         inc(i);
+
+      if (scr.cmd=scr_cmd_abort)  then
+      begin
+      break;
+      end;
+      if (scr.cmd=scr_cmd_error)   then  {obsolete}
+      begin
+      f_error(i)
+      end;
+     
+     
+ end;
+
+     result:=errId;
+end;
+
+
+end.
